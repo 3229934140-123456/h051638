@@ -230,7 +230,6 @@ def build_demo_config() -> Config:
             AlertRule(
                 name="HighCPUUsage",
                 metric_name="process_cpu_usage_percent",
-                label_matchers=[],
                 condition=">",
                 threshold=70.0,
                 for_duration=6.0,
@@ -242,21 +241,19 @@ def build_demo_config() -> Config:
             ),
             AlertRule(
                 name="HighErrorRate",
-                metric_name="http_requests_total",
-                label_matchers=[LabelMatcher(name="status", value="500", operator="=")],
+                expression="sum(rate(http_requests_total{status=\"500\"}[30s])) by (service)",
                 condition=">",
-                threshold=50.0,
+                threshold=0.5,
                 for_duration=5.0,
                 labels={"severity": "critical", "team": "api"},
                 annotations={
                     "summary": "High error rate on service {{$labels.service}}",
-                    "description": "500 errors count: {{$value}}",
+                    "description": "500 error rate: {{$value}} req/s (threshold: 0.5 req/s)",
                 },
             ),
             AlertRule(
                 name="TargetDown",
                 metric_name="up",
-                label_matchers=[],
                 condition="==",
                 threshold=0.0,
                 for_duration=8.0,

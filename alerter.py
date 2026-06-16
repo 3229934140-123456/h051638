@@ -202,15 +202,23 @@ class AlertManager:
         return changed_alerts
 
     def _evaluate_rule(self, rule: AlertRule, now: float) -> List[Alert]:
-        """评估单个告警规则"""
+        """评估单个告警规则
+
+        支持两种模式:
+        - 简单模式: metric_name + label_matchers → instant_query
+        - 表达式模式: expression → parse_and_query (支持 rate/sum 等组合)
+        """
         changed: List[Alert] = []
 
         try:
-            result = self._qe.instant_query(
-                metric_name=rule.metric_name,
-                label_matchers=rule.label_matchers,
-                at=now
-            )
+            if rule.is_expression_mode:
+                result = self._qe.parse_and_query(rule.expression, at=now)
+            else:
+                result = self._qe.instant_query(
+                    metric_name=rule.metric_name,
+                    label_matchers=rule.label_matchers,
+                    at=now
+                )
         except Exception as e:
             print(f"[AlertManager] Query error for rule {rule.name}: {e}")
             return changed

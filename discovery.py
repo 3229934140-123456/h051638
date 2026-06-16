@@ -35,7 +35,13 @@ class StaticTargetProvider(TargetProvider):
 
 
 class FileTargetProvider(TargetProvider):
-    """基于文件的目标发现: 定期读取 JSON 文件"""
+    """基于文件的目标发现: 定期读取 JSON 文件
+
+    特点:
+    - 文件未修改(mtime 不变)时返回缓存的目标列表
+    - 文件不存在时返回空列表
+    - 解析失败时保留上次成功的结果
+    """
 
     def __init__(self, filepath: str, default_interval: float = 15.0,
                  default_timeout: float = 10.0):
@@ -43,15 +49,21 @@ class FileTargetProvider(TargetProvider):
         self._default_interval = default_interval
         self._default_timeout = default_timeout
         self._last_mtime = None
+        self._cached_targets: List[ScrapeTarget] = []
+
+    @property
+    def filepath(self) -> str:
+        return self._filepath
 
     def discover(self) -> List[ScrapeTarget]:
         if not os.path.exists(self._filepath):
+            self._cached_targets = []
+            self._last_mtime = None
             return []
         try:
             mtime = os.path.getmtime(self._filepath)
             if mtime == self._last_mtime:
-                return []
-            self._last_mtime = mtime
+                return list(self._cached_targets)
 
             with open(self._filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -65,9 +77,13 @@ class FileTargetProvider(TargetProvider):
                     scrape_timeout=float(item.get("scrape_timeout", self._default_timeout)),
                     static_labels=item.get("labels", {})
                 ))
-            return targets
-        except (json.JSONDecodeError, KeyError, OSError):
-            return []
+
+            self._last_mtime = mtime
+            self._cached_targets = targets
+            return list(targets)
+        except (json.JSONDecodeError, KeyError, OSError) as e:
+            print(f"[FileTargetProvider] Error reading {self._filepath}: {e}")
+            return list(self._cached_targets)
 
 
 class DNSTargetProvider(TargetProvider):

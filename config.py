@@ -119,15 +119,29 @@ class LabelMatcher:
 
 @dataclass
 class AlertRule:
-    """告警规则配置"""
+    """告警规则配置
+
+    支持两种模式:
+    1. 简单模式:  metric_name + label_matchers (按指标+标签过滤后逐条判断)
+    2. 表达式模式: expression (DSL 查询表达式,如 sum(rate(x[5m])) by (service))
+    """
     name: str
-    metric_name: str
-    label_matchers: List[LabelMatcher]
     condition: str
     threshold: float
+    metric_name: Optional[str] = None
+    label_matchers: List[LabelMatcher] = field(default_factory=list)
+    expression: Optional[str] = None
     for_duration: float = 60.0
     labels: Dict[str, str] = field(default_factory=dict)
     annotations: Dict[str, str] = field(default_factory=dict)
+
+    def __post_init__(self):
+        if self.metric_name is None and self.expression is None:
+            raise ValueError("AlertRule requires either metric_name or expression")
+
+    @property
+    def is_expression_mode(self) -> bool:
+        return self.expression is not None
 
     def evaluate_condition(self, value: float) -> bool:
         if self.condition == ">":

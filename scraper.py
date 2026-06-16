@@ -138,11 +138,16 @@ class ScraperManager:
         self._stop_events: Dict[str, threading.Event] = {}
         self._lock = threading.RLock()
 
-    def add_target(self, target: ScrapeTarget) -> None:
+    def add_target(self, target: ScrapeTarget) -> ScrapeTarget:
+        """
+        添加目标（仅当目标不存在时）
+        返回实际使用的 ScrapeTarget 对象（可能是原有的，也可能是新的）
+        """
         key = self._target_key(target)
         with self._lock:
-            if key in self._targets:
-                self.remove_target(target)
+            existing = self._targets.get(key)
+            if existing is not None:
+                return existing
             self._targets[key] = target
             stop_evt = threading.Event()
             self._stop_events[key] = stop_evt
@@ -154,6 +159,7 @@ class ScraperManager:
             )
             self._threads[key] = t
             t.start()
+            return target
 
     def remove_target(self, target: ScrapeTarget) -> None:
         key = self._target_key(target)
@@ -167,14 +173,37 @@ class ScraperManager:
             self._stop_events.pop(key, None)
 
     def set_targets(self, targets: List[ScrapeTarget]) -> None:
-        new_keys = {self._target_key(t) for t in targets}
+        """
+        增量更新目标列表:
+        - 新增的目标: 启动抓取
+        - 消失的目标: 停止抓取
+        - 已存在的目标: 不做任何操作（保留健康状态、抓取次数等）
+        """
+        new_keys_map: Dict[str, ScrapeTarget] = {
+            self._target_key(t): t for t in targets
+        }
+        new_keys = set(new_keys_map.keys())
+
         with self._lock:
             existing_keys = set(self._targets.keys())
+
             for key in existing_keys - new_keys:
                 t = self._targets[key]
                 self.remove_target(t)
-            for t in targets:
-                self.add_target(t)
+
+            for key in new_keys - existing_keys:
+                t = new_keys_map[key]
+                self._targets[key] = t
+                stop_evt = threading.Event()
+                self._stop_events[key] = stop_evt
+                thread = threading.Thread(
+                    target=self._scrape_loop,
+                    args=(key, t, stop_evt),
+                    daemon=True,
+                    name=f"scraper-{t.job}"
+                )
+                self._threads[key] = thread
+                thread.start()
 
     def get_targets(self) -> List[ScrapeTarget]:
         with self._lock:
